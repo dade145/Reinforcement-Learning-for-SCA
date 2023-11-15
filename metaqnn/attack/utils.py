@@ -4,12 +4,16 @@ import os
 from os import path
 from typing import Callable
 
-import matplotlib.pyplot as plot
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plot
 import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-CPU_COUNT = len(os.sched_getaffinity(0)) if 'sched_getaffinity' in dir(os) else mp.cpu_count()
+import sys
+
+CPU_COUNT = (len(os.sched_getaffinity(0)) if 'sched_getaffinity' in dir(os) else mp.cpu_count())
 
 
 def shuffle_arrays_together(array_a: np.ndarray, array_b: np.ndarray):
@@ -25,32 +29,35 @@ def shuffle_arrays_together(array_a: np.ndarray, array_b: np.ndarray):
 # Compute the position of the key hypothesis key amongst the hypotheses
 def rk_key(rank_array, key):
     key_val = rank_array[key]
+    
     return np.where(np.sort(rank_array)[::-1] == key_val)[0][0]
 
 
-def rank_compute_precomputed_byte_n(prediction, byte_key_hypotheses, key, key_byte):
+def rank_compute_precomputed_byte_n(prediction, byte_key_hypotheses, key, key_byte, start):
     number_of_traces, _ = prediction.shape
 
     key_log_prob = np.zeros(256)
     rank_evol = np.zeros(number_of_traces)
     prediction = np.log(prediction + 1e-40)
-
+    #print(start, ': ', key[start])
     for i in range(number_of_traces):
         for k in range(256):
             key_log_prob[k] += prediction[i, int(byte_key_hypotheses[i, k])]  # Use precomputed hypothesis values
-
-        rank_evol[i] = rk_key(key_log_prob, key[key_byte])
+        
+        rank_evol[i] = rk_key(key_log_prob, key[start])
 
     return rank_evol
 
 
 # Performs attack
+
 def perform_attacks_precomputed_byte_n_parallel(traces_per_attack: int, predictions, attack_amount,
-                                                precomputed_byte0_values, key, key_byte, shuffle=True,
+                                                precomputed_byte0_values, key, key_byte, shuffle=False,
                                                 save_graph=False, filename='fig', folder='data') -> np.ndarray:
-    all_rk_evol = np.array(Parallel(n_jobs=CPU_COUNT)(delayed(_perform_attack_precomputed_byte_n)(
-        traces_per_attack, predictions, precomputed_byte0_values, key, key_byte, shuffle
-    ) for _ in tqdm(range(attack_amount))))
+    
+    all_rk_evol = np.array(Parallel(n_jobs=CPU_COUNT-4)(delayed(_perform_attack_precomputed_byte_n)(
+        traces_per_attack, predictions, precomputed_byte0_values, key, key_byte, num_att, shuffle
+    ) for num_att in tqdm(range(attack_amount))))
     rk_avg = np.mean(all_rk_evol, axis=0)
     _, nb_hyp = predictions.shape
 
@@ -61,16 +68,20 @@ def perform_attacks_precomputed_byte_n_parallel(traces_per_attack: int, predicti
 
 
 def _perform_attack_precomputed_byte_n(traces_per_attack: int, predictions, precomputed_byte0_values,
-                                       key, key_byte, shuffle=True):
+                                       key, key_byte, num_att, shuffle=False):
+    
+    start = num_att * traces_per_attack
+    end = (num_att + 1) * traces_per_attack
+
     if shuffle:
         sp, sbyte0_values = shuffle_arrays_together(predictions, precomputed_byte0_values)
-        att_pred = sp[:traces_per_attack]
-        att_byte0_values = sbyte0_values[:traces_per_attack]
+        att_pred = sp[start:end]
+        att_byte0_values = sbyte0_values[start:end]
     else:
-        att_pred = predictions[:traces_per_attack]
-        att_byte0_values = precomputed_byte0_values[:traces_per_attack]
+        att_pred = predictions[start:end]
+        att_byte0_values = precomputed_byte0_values[start:end]
 
-    return rank_compute_precomputed_byte_n(att_pred, att_byte0_values, key, key_byte)
+    return rank_compute_precomputed_byte_n(att_pred, att_byte0_values, key, key_byte, start)
 
 
 def plot_ge(rk_avg, traces_per_attack, attack_amount, filename='fig', folder='data'):
@@ -127,7 +138,7 @@ AES_SBox = np.array([
 def generate_precomputed_values_file(
         plaintext: np.ndarray, save_folder: str, byte: int = 0,
         mapping: Callable[[np.ndarray, np.ndarray, np.ndarray, int], int] =
-        lambda i, j, plaintext, byte: AES_SBox[j ^ plaintext[i, byte]]) -> np.ndarray:
+        lambda i, j, plaintext, byte: AES_SBox[j ^ plaintext[i]]) -> np.ndarray:
     """
     Generate precomputed byte values file from the plaintext combined with all possible key values
     :param plaintext: array-like

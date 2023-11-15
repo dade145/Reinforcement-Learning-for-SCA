@@ -12,6 +12,9 @@ import cloudpickle
 import numpy as np
 import pandas as pd
 
+import tensorflow as tf
+import os
+
 from metaqnn.grammar import q_learner
 from metaqnn.training.tensorflow_runner import TensorFlowRunner
 
@@ -97,8 +100,10 @@ class QCoordinator(object):
         ))
 
         process.start()
+        child.close()
         (predictions, (test_loss, test_accuracy)), trainable_params = cloudpickle.loads(parent.recv())
         process.join()
+        parent.close()
 
         guessing_entropy = self.tf_runner.perform_attacks_parallel(
             predictions, save_graph=True, filename=f"{self.hyper_parameters.MODEL_NAME}_{iteration:04}",
@@ -125,9 +130,10 @@ class QCoordinator(object):
             model = tf_runner.compile_model(net, loss='categorical_crossentropy', metric_list=['accuracy'])
             model.summary()
             trainable_params = tf_runner.count_trainable_params(model)
-
+            
             return_pipe.send(cloudpickle.dumps((
-                tf_runner.train_and_predict(model, parallel_no),
+                #tf_runner.train_and_predict(model, parallel_no),
+                tf_runner.train_and_predict(model, 1),
                 trainable_params
             )))
 
@@ -305,4 +311,6 @@ def main():
 
 
 if __name__ == '__main__':
+    
+    os.environ["CUDA_VISIBLE_DEVICES"]="1"
     main()

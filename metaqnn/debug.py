@@ -15,6 +15,8 @@ def debug():
     print("\n\nLogical GPU devices:")
     print(log_gpu)
 
+    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
     print("\n\nlspci -vnnn | grep -i 'nvidia':")
     print(lspci.stdout.decode('utf-8'))
 

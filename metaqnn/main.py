@@ -274,7 +274,7 @@ if __name__ == '__main__':
                         help='How many models for this epsilon do you want to train.')
     
     parser.add_argument('-gpu', '--number_gpu', type=str,
-                        help='On which GPU do you want to train.')
+                        help='On which GPU do you want to train.', required=False, default='0')
 
     args = parser.parse_args()
 
@@ -286,7 +286,7 @@ if __name__ == '__main__':
         0
     )
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.number_gpu
     
     factory = QCoordinator(
         path.normpath(path.join(_model.hyper_parameters.BULK_ROOT, "qlearner_logs")),

@@ -2,18 +2,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from typing import List
 import numpy as np
-from os import path
 
 from metaqnn.grammar.state_enumerator import State
 from metaqnn.attack import utils
 from metaqnn.training.one_cycle_lr import OneCycleLR
 import metaqnn.data_loader as data_loader
 import tensorflow as tf
-from tensorflow import keras
 from keras.optimizers import Adam
-from keras.utils import to_categorical
 from keras import backend as K
-from sklearn import preprocessing
 
 
 class TensorFlowRunner(object):
@@ -21,7 +17,7 @@ class TensorFlowRunner(object):
         self.ssp = state_space_parameters
         self.hp = hyper_parameters
         self.key = self.hp.KEY
-        self.precomputed_byte_values = self.hp.ATTACK_PRECOMPUTED_BYTE_VALUES
+        self.precomputed_byte_values = self.hp.ATTACK_PRECOMPUTED_BYTE_VALUES        
     
 
     @staticmethod
@@ -52,14 +48,14 @@ class TensorFlowRunner(object):
     def train_and_predict(self, model, parallel_no=1):
         # create dataloaders
         self.train_db = data_loader.ClassifierDataset(self.hp.DB_FILE, 'train', self.hp.TRAIN_BATCH_SIZE)
-        self.valid_db = data_loader.ClassifierDataset(self.hp.DB_FILE, 'valid',self.hp.TRAIN_BATCH_SIZE, shuffle=False)
-        self.test_db =  data_loader.ClassifierDataset(self.hp.DB_FILE, 'test',self.hp.TRAIN_BATCH_SIZE, shuffle=False)
+        self.valid_db = data_loader.ClassifierDataset(self.hp.DB_FILE, 'valid', self.hp.TRAIN_BATCH_SIZE, shuffle=False)
+        self.test_db = data_loader.ClassifierDataset(self.hp.DB_FILE, 'test', self.hp.TRAIN_BATCH_SIZE, shuffle=False)
         
-
         model.fit(
             x = self.train_db,
             epochs=self.hp.MAX_EPOCHS,
             validation_data = self.valid_db,
+            shuffle = False,
             callbacks=[
                 OneCycleLR(
                     max_lr=self.hp.MAX_LR * parallel_no, batch_size=self.hp.TRAIN_BATCH_SIZE * parallel_no, samples=self.hp.INPUT_SIZE, end_percentage=0.2, scale_percentage=0.1,
@@ -70,8 +66,8 @@ class TensorFlowRunner(object):
         )
 
         return (
-            model.predict(self.valid_db),
-            model.evaluate(x=self.valid_db, batch_size=self.hp.EVAL_BATCH_SIZE)
+            model.predict(self.test_db),
+            model.evaluate(x=self.valid_db)
         )
 
     def perform_attacks(self, predictions, save_graph: bool = False, filename: str = None, folder: str = None):

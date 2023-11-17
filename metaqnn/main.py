@@ -1,6 +1,5 @@
 import argparse
 import math
-import multiprocessing as mp
 import os
 import sys
 import time
@@ -8,11 +7,9 @@ import traceback
 from datetime import datetime
 from os import path
 
-import cloudpickle
 import numpy as np
 import pandas as pd
 
-import tensorflow as tf
 import os
 
 from metaqnn.grammar import q_learner
@@ -89,21 +86,11 @@ class QCoordinator(object):
             TermColors.OKBLUE, net_to_run, iteration, self.epsilon, self.number_trained_unique(self.epsilon),
             self.number_models, TermColors.RESET
         ))
-
-        parent, child = mp.Pipe(duplex=False)
-        process = mp.Process(target=self._train_and_predict, args=(
-            cloudpickle.dumps(self.tf_runner),
+        
+        (predictions, (test_loss, test_accuracy)), trainable_params = self._train_and_predict(self.tf_runner,
             net,
             self.hyper_parameters.MODEL_NAME,
-            iteration,
-            child
-        ))
-
-        process.start()
-        child.close()
-        (predictions, (test_loss, test_accuracy)), trainable_params = cloudpickle.loads(parent.recv())
-        process.join()
-        parent.close()
+            iteration)
 
         guessing_entropy = self.tf_runner.perform_attacks_parallel(
             predictions, save_graph=True, filename=f"{self.hyper_parameters.MODEL_NAME}_{iteration:04}",
@@ -119,8 +106,7 @@ class QCoordinator(object):
         )
 
     @staticmethod
-    def _train_and_predict(tf_runner, net, model_name, iteration, return_pipe):
-        tf_runner = cloudpickle.loads(tf_runner)
+    def _train_and_predict(tf_runner, net, model_name, iteration):
         strategy = tf_runner.get_strategy()
         parallel_no = strategy.num_replicas_in_sync
         if parallel_no is None:
@@ -130,14 +116,10 @@ class QCoordinator(object):
             model = tf_runner.compile_model(net, loss='categorical_crossentropy', metric_list=['accuracy'])
             model.summary()
             trainable_params = tf_runner.count_trainable_params(model)
-            
-            return_pipe.send(cloudpickle.dumps((
-                #tf_runner.train_and_predict(model, parallel_no),
-                tf_runner.train_and_predict(model, 1),
-                trainable_params
-            )))
 
-        model.save(path.normpath(f"{tf_runner.hp.TRAINED_MODEL_DIR}/{model_name}_{iteration:04}.h5"))
+        model.save(path.normpath(f"{tf_runner.hp.TRAINED_MODEL_DIR}/{model_name}_{iteration:04}.keras"))
+        
+        return tf_runner.train_and_predict(model, parallel_no), trainable_params
 
     def load_replay(self):
         if os.path.isfile(self.replay_dictionary_path):
@@ -269,7 +251,8 @@ class QCoordinator(object):
             print(traceback.print_exc())
 
 
-def main():
+
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     model_pkgpath = 'models'
@@ -289,6 +272,9 @@ def main():
     parser.add_argument('-eps', '--epsilon', help='For Epsilon Greedy Strategy', type=float)
     parser.add_argument('-nmt', '--number_models_to_train', type=int,
                         help='How many models for this epsilon do you want to train.')
+    
+    parser.add_argument('-gpu', '--number_gpu', type=str,
+                        help='On which GPU do you want to train.')
 
     args = parser.parse_args()
 
@@ -300,6 +286,8 @@ def main():
         0
     )
 
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    
     factory = QCoordinator(
         path.normpath(path.join(_model.hyper_parameters.BULK_ROOT, "qlearner_logs")),
         _model.state_space_parameters,
@@ -309,8 +297,3 @@ def main():
         args.reward_small
     )
 
-
-if __name__ == '__main__':
-    
-    os.environ["CUDA_VISIBLE_DEVICES"]="1"
-    main()

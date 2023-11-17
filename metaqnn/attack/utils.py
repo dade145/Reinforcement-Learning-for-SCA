@@ -9,7 +9,7 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plot
 import numpy as np
 from joblib import Parallel, delayed
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import sys
 
@@ -39,7 +39,7 @@ def rank_compute_precomputed_byte_n(prediction, byte_key_hypotheses, key, key_by
     key_log_prob = np.zeros(256)
     rank_evol = np.zeros(number_of_traces)
     prediction = np.log(prediction + 1e-40)
-    #print(start, ': ', key[start])
+    
     for i in range(number_of_traces):
         for k in range(256):
             key_log_prob[k] += prediction[i, int(byte_key_hypotheses[i, k])]  # Use precomputed hypothesis values

@@ -1,6 +1,10 @@
 import argparse
 import math
 import os
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ["KERAS_BACKEND"] = "tensorflow"
+
 import sys
 import time
 import traceback
@@ -10,11 +14,9 @@ from os import path
 import numpy as np
 import pandas as pd
 
-import os
-
 from metaqnn.grammar import q_learner
 from metaqnn.training.tensorflow_runner import TensorFlowRunner
-
+import tensorflow as tf
 
 class TermColors(object):
     HEADER = '\033[95m'
@@ -37,7 +39,8 @@ class QCoordinator(object):
                  number_models=None,
                  reward_small=False):
 
-        print("\n\nRun started at: {}".format(datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
+        print("\n\nRun started at: {}".format(
+            datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
 
         self.replay_columns = [
             'net',  # Net String
@@ -53,7 +56,8 @@ class QCoordinator(object):
 
         self.list_path = list_path
 
-        self.replay_dictionary_path = os.path.join(list_path, 'replay_database.csv')
+        self.replay_dictionary_path = os.path.join(
+            list_path, 'replay_database.csv')
         self.replay_dictionary, self.q_training_step = self.load_replay()
 
         self.schedule_or_single = False if epsilon else True
@@ -71,26 +75,29 @@ class QCoordinator(object):
 
         self.list_path = list_path
         self.qlearner = self.load_qlearner()
-        self.tf_runner = TensorFlowRunner(self.state_space_parameters, self.hyper_parameters)
+        self.tf_runner = TensorFlowRunner(
+            self.state_space_parameters, self.hyper_parameters)
         self.ten_percent_index = self.hyper_parameters.TRACES_PER_ATTACK // 10 - 1
         self.fifty_percent_index = self.hyper_parameters.TRACES_PER_ATTACK // 2 - 1
 
         while not self.check_reached_limit():
             self.train_new_net()
 
-        print('{}{}Experiment Complete{}'.format(TermColors.BOLD, TermColors.OKGREEN, TermColors.RESET))
+        print('{}{}Experiment Complete{}'.format(
+            TermColors.BOLD, TermColors.OKGREEN, TermColors.RESET))
 
     def train_new_net(self):
         net, net_to_run, iteration = self.generate_new_network()
         print('{}Training net:\n{}\nIteration {:d}, Epsilon {:f}: [Network {:d}/{:d}]{}'.format(
-            TermColors.OKBLUE, net_to_run, iteration, self.epsilon, self.number_trained_unique(self.epsilon),
+            TermColors.OKBLUE, net_to_run, iteration, self.epsilon, self.number_trained_unique(
+                self.epsilon),
             self.number_models, TermColors.RESET
         ))
-        
+
         (predictions, (test_loss, test_accuracy)), trainable_params = self._train_and_predict(self.tf_runner,
-            net,
-            self.hyper_parameters.MODEL_NAME,
-            iteration)
+                                                                                              net,
+                                                                                              self.hyper_parameters.MODEL_NAME,
+                                                                                              iteration)
 
         guessing_entropy = self.tf_runner.perform_attacks_parallel(
             predictions, save_graph=True, filename=f"{self.hyper_parameters.MODEL_NAME}_{iteration:04}",
@@ -107,19 +114,23 @@ class QCoordinator(object):
 
     @staticmethod
     def _train_and_predict(tf_runner, net, model_name, iteration):
-        strategy = tf_runner.get_strategy()
-        parallel_no = strategy.num_replicas_in_sync
-        if parallel_no is None:
-            parallel_no = 1
+        #strategy = tf_runner.get_strategy()
+        #parallel_no = strategy.num_replicas_in_sync
+        #if parallel_no is None:
+        parallel_no = 1
 
-        with strategy.scope():
-            model = tf_runner.compile_model(net, loss='categorical_crossentropy', metric_list=['accuracy'])
-            model.summary()
-            trainable_params = tf_runner.count_trainable_params(model)
+        #with strategy.scope():
+        model = tf_runner.compile_model(
+            net, loss='categorical_crossentropy', metric_list=['accuracy'])
+        model.summary()
+        trainable_params = tf_runner.count_trainable_params(model)
+        pred, eval = tf_runner.train_and_predict(
+            model, iteration, parallel_no)
 
-        model.save(path.normpath(f"{tf_runner.hp.TRAINED_MODEL_DIR}/{model_name}_{iteration:04}.keras"))
-        
-        return tf_runner.train_and_predict(model, parallel_no), trainable_params
+        # Model is now saved using ModelCheckpoint callback
+        # model.export(path.normpath(f"{tf_runner.hp.TRAINED_MODEL_DIR}/{model_name}_{iteration:04}.keras"))
+
+        return (pred, eval), trainable_params
 
     def load_replay(self):
         if os.path.isfile(self.replay_dictionary_path):
@@ -152,12 +163,14 @@ class QCoordinator(object):
     @staticmethod
     def filter_replay_for_first_run(replay):
         """ Order replay by iteration, then remove duplicate nets keeping the first"""
-        temp = replay.sort_values(['ix_q_value_update']).reset_index(drop=True).copy()
+        temp = replay.sort_values(
+            ['ix_q_value_update']).reset_index(drop=True).copy()
         return temp.drop_duplicates(['net'])
 
     def number_trained_unique(self, epsilon=None):
         """Epsilon defaults to the minimum"""
-        replay_unique = self.filter_replay_for_first_run(self.replay_dictionary)
+        replay_unique = self.filter_replay_for_first_run(
+            self.replay_dictionary)
         eps = epsilon if epsilon else min(replay_unique.epsilon.values)
         replay_unique = replay_unique[replay_unique.epsilon == eps]
         return len(replay_unique)
@@ -165,7 +178,8 @@ class QCoordinator(object):
     def check_reached_limit(self):
         """ Returns True if the experiment is complete"""
         if len(self.replay_dictionary):
-            completed_current = self.number_trained_unique(self.epsilon) >= self.number_models
+            completed_current = self.number_trained_unique(
+                self.epsilon) >= self.number_models
 
             if completed_current:
                 if self.schedule_or_single:
@@ -235,7 +249,8 @@ class QCoordinator(object):
                         'time_finished': [time.time()]
                     })
                 ])
-                self.replay_dictionary.to_csv(self.replay_dictionary_path, index=False, columns=self.replay_columns)
+                self.replay_dictionary.to_csv(
+                    self.replay_dictionary_path, index=False, columns=self.replay_columns)
 
             self.qlearner.update_replay_database(self.replay_dictionary)
             for train_iter in iterations:
@@ -251,8 +266,8 @@ class QCoordinator(object):
             print(traceback.print_exc())
 
 
-
 if __name__ == '__main__':
+    
     parser = argparse.ArgumentParser()
 
     model_pkgpath = 'models'
@@ -269,10 +284,11 @@ if __name__ == '__main__':
         help='Reward having a network with little trainable parameters',
         action='store_true'
     )
-    parser.add_argument('-eps', '--epsilon', help='For Epsilon Greedy Strategy', type=float)
+    parser.add_argument('-eps', '--epsilon',
+                        help='For Epsilon Greedy Strategy', type=float)
     parser.add_argument('-nmt', '--number_models_to_train', type=int,
                         help='How many models for this epsilon do you want to train.')
-    
+
     parser.add_argument('-gpu', '--number_gpu', type=str,
                         help='On which GPU do you want to train.', required=False, default='0')
 
@@ -286,14 +302,21 @@ if __name__ == '__main__':
         0
     )
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.number_gpu
+    num_gpu = int(args.number_gpu)
+    gpus = tf.config.list_physical_devices('GPU')
     
+    if gpus:
+        try:
+            tf.config.set_visible_devices(gpus[num_gpu], 'GPU')
+            tf.config.experimental.set_memory_growth(gpus[num_gpu], True)
+        except RuntimeError as e:
+            print(e)
+
     factory = QCoordinator(
-        path.normpath(path.join(_model.hyper_parameters.BULK_ROOT, "qlearner_logs")),
+        path.normpath(
+            path.join(_model.hyper_parameters.BULK_ROOT, "qlearner_logs")),
         _model.state_space_parameters,
         _model.hyper_parameters,
         args.epsilon,
         args.number_models_to_train,
-        args.reward_small
-    )
-
+        args.reward_small)

@@ -1,7 +1,6 @@
 import math
 
-import tensorflow as tf
-
+import keras
 
 class State(object):
     def __init__(self,
@@ -43,27 +42,27 @@ class State(object):
 
     def to_tensorflow_layer(self):  # TODO Make activation configurable
         if self.terminate:
-            return tf.keras.layers.Dense(self.fc_size, kernel_initializer='glorot_uniform', activation='softmax')
+            return keras.layers.Dense(self.fc_size, kernel_initializer='glorot_uniform', activation='softmax')
         elif self.layer_type == 'start':
-            return tf.keras.layers.InputLayer(input_shape=(self.feature_size, 1))
+            return keras.layers.InputLayer(shape=(self.feature_size, 1))
         elif self.layer_type == 'conv':
-            return tf.keras.layers.Convolution1D(filters=self.filter_depth, kernel_size=self.filter_size,
+            return keras.layers.Convolution1D(filters=self.filter_depth, kernel_size=self.filter_size,
                                                  strides=self.stride, kernel_initializer='he_uniform',
                                                  activation='selu', padding='same')
         elif self.layer_type == 'gap':
-            return tf.keras.layers.GlobalAveragePooling1D()
+            return keras.layers.GlobalAveragePooling1D()
         elif self.layer_type == 'pool':
-            return tf.keras.layers.AveragePooling1D(pool_size=self.filter_size, strides=self.stride)
+            return keras.layers.AveragePooling1D(pool_size=self.filter_size, strides=self.stride)
         elif self.layer_type == 'flatten':
-            return tf.keras.layers.Flatten()
+            return keras.layers.Flatten()
         elif self.layer_type == 'max_pool':
-            return tf.keras.layers.MaxPooling1D(pool_size=self.filter_size, strides=self.stride)
+            return keras.layers.MaxPooling1D(pool_size=self.filter_size, strides=self.stride)
         elif self.layer_type == 'fc':
-            return tf.keras.layers.Dense(self.fc_size, kernel_initializer='he_uniform', activation='selu')
+            return keras.layers.Dense(self.fc_size, kernel_initializer='he_uniform', activation='selu')
         elif self.layer_type == 'batch_norm':
-            return tf.keras.layers.BatchNormalization()
+            return keras.layers.BatchNormalization()
         elif self.layer_type == 'dropout':
-            return tf.keras.layers.Dropout(self.dropout_ratio)
+            return keras.layers.Dropout(self.dropout_ratio)
         return None
 
     def copy(self):

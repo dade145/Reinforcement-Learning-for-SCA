@@ -1,11 +1,7 @@
 import os
 import numpy as np
 import warnings
-from tensorflow import keras
 from keras.callbacks import Callback
-#from tensorflow.keras.callbacks import Callback
-from keras import backend as K
-#from tensorflow.keras import backend as K
 
 
 # Code implemented by https://github.com/titu1994/keras-one-cycle
@@ -164,14 +160,14 @@ class OneCycleLR(Callback):
         self.mid_cycle_id = int(self.num_iterations * ((1. - self.end_percentage)) / float(2))
 
         self._reset()
-        K.set_value(self.model.optimizer.lr, self.compute_lr())
+        self.model.optimizer.lr = self.compute_lr()
 
         if self._update_momentum:
             if not hasattr(self.model.optimizer, 'momentum'):
                 raise ValueError("Momentum can be updated only on SGD optimizer !")
 
             new_momentum = self.compute_momentum()
-            K.set_value(self.model.optimizer.momentum, new_momentum)
+            self.model.optimizer.momentum = new_momentum
 
     def on_batch_end(self, epoch, logs=None):
         logs = logs or {}
@@ -180,8 +176,8 @@ class OneCycleLR(Callback):
         new_lr = self.compute_lr()
 
         self.history.setdefault('lr', []).append(
-            K.get_value(self.model.optimizer.lr))
-        K.set_value(self.model.optimizer.lr, new_lr)
+            self.model.optimizer.lr)
+        self.model.optimizer.lr = new_lr
 
         if self._update_momentum:
             if not hasattr(self.model.optimizer, 'momentum'):
@@ -190,8 +186,8 @@ class OneCycleLR(Callback):
             new_momentum = self.compute_momentum()
 
             self.history.setdefault('momentum', []).append(
-                K.get_value(self.model.optimizer.momentum))
-            K.set_value(self.model.optimizer.momentum, new_momentum)
+                self.model.optimizer.momentum)
+            self.model.optimizer.momentum = new_momentum
 
         for k, v in logs.items():
             self.history.setdefault(k, []).append(v)
@@ -323,7 +319,7 @@ class LRFinder(Callback):
     def on_train_begin(self, logs=None):
 
         self.current_epoch_ = 1
-        K.set_value(self.model.optimizer.lr, self.initial_lr)
+        self.model.optimizer.lr = self.initial_lr
 
         warnings.simplefilter("ignore")
 
@@ -379,7 +375,7 @@ class LRFinder(Callback):
         if running_loss < self.best_loss_ or self.current_batch_ == 1:
             self.best_loss_ = running_loss
 
-        current_lr = K.get_value(self.model.optimizer.lr)
+        current_lr = self.model.optimizer.lr
 
         self.history.setdefault('running_loss_', []).append(running_loss)
         if self.lr_scale == 'exp':
@@ -393,7 +389,7 @@ class LRFinder(Callback):
         else:
             current_lr = self.lr_multiplier_[self.current_batch_ - 1]
 
-        K.set_value(self.model.optimizer.lr, current_lr)
+        self.model.optimizer.lr = current_lr
 
         # save the other metrics as well
         for k, v in logs.items():

@@ -44,23 +44,74 @@ def plot_ge(rk_avg, traces_per_attack, attack_amount, filename='fig', folder='da
 ###############
 
 # Performs attack
-def perform_attacks_per_key(predictions, ptexts, keys, target_byte, n_attacks, cipher: CipherSca):
-    ranks = []
-    key_values = np.random.choice(np.arange(0, 256), n_attacks, replace=False)
-    
-    for k in tqdm(key_values, desc='Performing attacks', leave=False):
-        key_filter = keys[:, 0] == k
-        if np.sum(key_filter) > 0:
-            keys_perKey = keys[key_filter]
-            predictions_perKey = predictions[key_filter]
-            plains_perKey = ptexts[key_filter]
+def perform_attacks_per_key(predictions, plaintexts, true_keys, target_byte,
+                    n_attacks=None, cipher: CipherSca = AesSca(), leakage='sbox',
+                    output_rank=True) -> np.ndarray:
 
-            mapping = [cipher.invAttackedIntermediate(plains_perKey, np.array(
-                [i]*len(plains_perKey)), target_byte) for i in range(256)]
-            key_proba = sortPredictions(predictions_perKey, np.array(mapping).T)
-            atk_key_byte = cipher.attackedKeyByte(keys_perKey[0], target_byte)
-            rank_ak, _ = guessMetrics(np.log(key_proba), atk_key_byte)
-            ranks.append(rank_ak - 1)
+    # If all the true keys are the same
+    if np.all(true_keys[:, target_byte] == true_keys[0, target_byte]):
+        ranks = _attackSingleKey(
+            predictions, plaintexts, true_keys, target_byte, cipher, leakage, n_attacks,
+            output_rank)
+    else:
+        ranks = _attackVariousKey(
+            predictions, plaintexts, true_keys, target_byte, cipher, leakage,
+            output_rank)
+
+    return ranks
+
+
+def _attackSingleKey(predictions, plaintexts, true_keys, target_byte, cipher, leakage, n_attacks,
+                     output_rank):
+    '''
+    Perform the attack when all the true keys are the same.
+    Repeat the attack `n_attacks` times, on different batch of predictions.
+    '''
+    ranks = []
+    for chunk in tqdm(range(n_attacks), desc='Performing attacks', leave=False):
+        keys_filtered = true_keys[chunk::n_attacks]
+        predictions_filtered = predictions[chunk::n_attacks]
+        plains_filtered = plaintexts[chunk::n_attacks]
+
+        key_probabilities = sortPredictions(
+            predictions_filtered, plains_filtered, target_byte, cipher, leakage)
+
+        if output_rank:
+            atk_key_byte = cipher.attackedKeyByte(keys_filtered[0], target_byte)
+            rank_ak, _ = guessMetrics(np.log(key_probabilities), atk_key_byte)
+            ranks.append(rank_ak)
+        else:
+            ranks.append(np.sum(np.log(key_probabilities), axis=0))
+    return ranks
+
+
+def _attackVariousKey(predictions, plaintexts, true_keys, target_byte, cipher, leakage,
+                      output_rank):
+    '''
+    Perform the attack when the true keys are different.
+    Repeat the attack for each possible key value.
+    '''
+    ranks = []
+    key_values = np.arange(0, 256)
+
+    for k in tqdm(key_values, desc='Performing attacks', leave=False):
+        filter = true_keys[:, target_byte] == k
+
+        if np.sum(filter) > 0:
+            keys_filtered = true_keys[filter]
+            predictions_filtered = predictions[filter]
+            plains_filtered = plaintexts[filter]
+
+            key_probabilities = sortPredictions(
+                predictions_filtered, plains_filtered, target_byte, cipher, leakage)
+
+            if output_rank:
+                atk_key_byte = cipher.attackedKeyByte(keys_filtered[0], target_byte)
+                rank_ak, _ = guessMetrics(np.log(key_probabilities), atk_key_byte)
+                ranks.append(rank_ak)
+            else:
+                ranks.append(np.sum(np.log(key_probabilities), axis=0))
+            
     return ranks
 
 
@@ -76,3 +127,9 @@ def getCipher(cipher_name: str):
     else:
         raise ValueError(
             f'Unknown cipher {cipher_name}. Choose between: aes, clefia, camellia, or seed.')
+        
+def convertLeakage(leakage: str):
+    if 'hw' in leakage.lower():
+        return 'hw'
+    else:
+        return 'identity'

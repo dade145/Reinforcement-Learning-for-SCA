@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import multiprocessing as mp
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -11,12 +12,16 @@ import traceback
 from datetime import datetime
 from os import path
 
+import cloudpickle
 import numpy as np
 import pandas as pd
 
 from metaqnn.grammar import q_learner
 from metaqnn.training.tensorflow_runner import TensorFlowRunner
 import tensorflow as tf
+from metaqnn.training.utils import custom_loss, AccuracyMetric
+from metaqnn.training.key_rank_metric import KeyRankMetric
+from metaqnn.training.utils import setGpu
 
 class TermColors(object):
     HEADER = '\033[95m'
@@ -37,7 +42,8 @@ class QCoordinator(object):
                  hyper_parameters,
                  epsilon=None,
                  number_models=None,
-                 reward_small=False):
+                 reward_small=False,
+                 gpu=0):
 
         print("\n\nRun started at: {}".format(
             datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
@@ -79,25 +85,36 @@ class QCoordinator(object):
             self.state_space_parameters, self.hyper_parameters)
         self.ten_percent_index = self.hyper_parameters.TRACES_PER_ATTACK // 10 - 1
         self.fifty_percent_index = self.hyper_parameters.TRACES_PER_ATTACK // 2 - 1
+        
+        self.gpu = gpu
 
         while not self.check_reached_limit():
+            TensorFlowRunner.clear_session()
             self.train_new_net()
 
         print('{}{}Experiment Complete{}'.format(
             TermColors.BOLD, TermColors.OKGREEN, TermColors.RESET))
 
-    def train_new_net(self):
+    def train_new_net(self):       
         net, net_to_run, iteration = self.generate_new_network()
         print('{}Training net:\n{}\nIteration {:d}, Epsilon {:f}: [Network {:d}/{:d}]{}'.format(
-            TermColors.OKBLUE, net_to_run, iteration, self.epsilon, self.number_trained_unique(
-                self.epsilon),
+            TermColors.OKBLUE, net_to_run, iteration, self.epsilon, self.number_trained_unique(self.epsilon),
             self.number_models, TermColors.RESET
         ))
 
-        (predictions, (test_loss, test_accuracy)), trainable_params = self._train_and_predict(self.tf_runner,
-                                                                                              net,
-                                                                                              self.hyper_parameters.MODEL_NAME,
-                                                                                              iteration)
+        parent, child = mp.Pipe(duplex=False)
+        process = mp.Process(target=self._train_and_predict, args=(
+            cloudpickle.dumps(self.tf_runner),
+            net,
+            self.hyper_parameters.MODEL_NAME,
+            iteration,
+            self.gpu,
+            child
+        ))
+
+        process.start()
+        (predictions, (test_loss, test_accuracy, test_key_rank)), trainable_params = cloudpickle.loads(parent.recv())
+        process.join()
 
         guessing_entropy = self.tf_runner.perform_attacks_parallel(
             predictions, save_graph=True, filename=f"{self.hyper_parameters.MODEL_NAME}_{iteration:04}",
@@ -112,8 +129,13 @@ class QCoordinator(object):
             trainable_params, float(self.epsilon), [iteration]
         )
 
+        
+
     @staticmethod
-    def _train_and_predict(tf_runner, net, model_name, iteration):
+    def _train_and_predict(tf_runner, net, model_name, iteration, gpu, return_pipe):
+        tf_runner = cloudpickle.loads(tf_runner)
+        
+        setGpu(gpu)
         #strategy = tf_runner.get_strategy()
         #parallel_no = strategy.num_replicas_in_sync
         #if parallel_no is None:
@@ -121,16 +143,21 @@ class QCoordinator(object):
 
         #with strategy.scope():
         model = tf_runner.compile_model(
-            net, loss='categorical_crossentropy', metric_list=['accuracy'])
+            net, loss=custom_loss, metric_list=[AccuracyMetric(), KeyRankMetric()])
+            #net, loss='categorical_crossentropy', metric_list=['accuracy'])
         model.summary()
         trainable_params = tf_runner.count_trainable_params(model)
         pred, eval = tf_runner.train_and_predict(
             model, iteration, parallel_no)
-
+        
         # Model is now saved using ModelCheckpoint callback
         # model.export(path.normpath(f"{tf_runner.hp.TRAINED_MODEL_DIR}/{model_name}_{iteration:04}.keras"))
+     
+        return_pipe.send(cloudpickle.dumps((
+                (pred, eval),
+                trainable_params
+            )))
 
-        return (pred, eval), trainable_params
 
     def load_replay(self):
         if os.path.isfile(self.replay_dictionary_path):
@@ -303,15 +330,7 @@ if __name__ == '__main__':
     )
 
     num_gpu = int(args.number_gpu)
-    gpus = tf.config.list_physical_devices('GPU')
     
-    if gpus:
-        try:
-            tf.config.set_visible_devices(gpus[num_gpu], 'GPU')
-            tf.config.experimental.set_memory_growth(gpus[num_gpu], True)
-        except RuntimeError as e:
-            print(e)
-
     factory = QCoordinator(
         path.normpath(
             path.join(_model.hyper_parameters.BULK_ROOT, "qlearner_logs")),
@@ -319,4 +338,5 @@ if __name__ == '__main__':
         _model.hyper_parameters,
         args.epsilon,
         args.number_models_to_train,
-        args.reward_small)
+        args.reward_small,
+        gpu = num_gpu)

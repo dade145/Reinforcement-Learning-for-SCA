@@ -10,7 +10,7 @@ class OneCycleLR(Callback):
     def __init__(self,
                  max_lr,
                  batch_size,
-                 samples,
+                 samples=None,
                  end_percentage=0.1,
                  scale_percentage=None,
                  maximum_momentum=0.95,
